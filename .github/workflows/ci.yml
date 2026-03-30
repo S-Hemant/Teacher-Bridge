@@ -1,0 +1,120 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Generate Prisma
+        run: npx prisma generate
+      - name: Lint
+        run: npm run lint --if-present
+      - name: Build
+        run: npm run build
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Lint
+        run: npm run lint --if-present
+      - name: Build
+        run: npm run build
+
+  api-e2e:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: teacherbridge
+          POSTGRES_PASSWORD: teacherbridge
+          POSTGRES_DB: teacherbridge
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U teacherbridge -d teacherbridge"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      minio:
+        image: minio/minio:latest
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        ports:
+          - 9000:9000
+    env:
+      DATABASE_URL: postgresql://teacherbridge:teacherbridge@localhost:5432/teacherbridge?schema=public
+      REDIS_URL: redis://localhost:6379
+      JWT_SECRET: test-jwt-secret-change-in-production-min-32-chars-long
+      JWT_REFRESH_SECRET: test-refresh-secret-different-from-access-key
+      JWT_ACCESS_EXPIRES: 15m
+      JWT_REFRESH_DAYS: '7'
+      S3_ENDPOINT: http://localhost:9000
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+      S3_BUCKET: teacher-bridge
+      S3_REGION: us-east-1
+      S3_FORCE_PATH_STYLE: 'true'
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Generate Prisma
+        run: npx prisma generate
+      - name: Wait for MinIO
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:9000/minio/health/live && exit 0
+            sleep 2
+          done
+          exit 1
+      - name: Migrate database
+        run: npx prisma migrate deploy
+      - name: E2E tests
+        run: npm run test:e2e

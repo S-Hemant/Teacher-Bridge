@@ -1,0 +1,266 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  teacher
+  student
+}
+
+enum UserStatus {
+  active
+  disabled
+}
+
+enum SessionStatus {
+  scheduled
+  completed
+  cancelled
+}
+
+enum VoiceQueryStatus {
+  pending
+  processing
+  done
+  failed
+}
+
+model User {
+  id           String     @id @default(uuid())
+  email        String     @unique
+  passwordHash String?    @map("password_hash")
+  googleId     String?    @unique @map("google_id")
+  role         UserRole
+  status       UserStatus @default(active)
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  profile         Profile?
+  teacherProfile  TeacherProfile?
+  studentProfile  StudentProfile?
+  refreshTokens   RefreshToken[]
+  documents       Document[]       @relation("DocumentOwner")
+  reviewsWritten  Review[]         @relation("ReviewStudent")
+  sessionsAsStudent LearningSession[] @relation("SessionStudent")
+  sessionsAsTeacher LearningSession[] @relation("SessionTeacher")
+  voiceQueries    VoiceQuery[]
+  savedByStudents SavedTeacher[]   @relation("SavedTeacherTarget")
+  savedTeachers   SavedTeacher[]   @relation("SavedTeacherStudent")
+  progressEntries ProgressEntry[]
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  tokenHash String   @map("token_hash")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Profile {
+  id          String  @id @default(uuid())
+  userId      String  @unique @map("user_id")
+  displayName String  @map("display_name")
+  avatarUrl   String? @map("avatar_url")
+  bio         String?
+  locale      String  @default("en")
+  timezone    String  @default("UTC")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Subject {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+
+  teacherSubjects       TeacherSubject[]
+  progressEntries       ProgressEntry[]
+  primaryTeacherProfiles TeacherProfile[] @relation("PrimarySubject")
+}
+
+model Tag {
+  id   String @id @default(uuid())
+  name String @unique
+
+  teachers TeacherTag[]
+}
+
+model TeacherProfile {
+  id                   String   @id @default(uuid())
+  userId               String   @unique @map("user_id")
+  headline             String?
+  yearsExperience      Int      @default(0) @map("years_experience")
+  hourlyRateCents      Int      @default(0) @map("hourly_rate_cents")
+  currency             String   @default("USD")
+  teachingPreferences  Json?    @map("teaching_preferences")
+  primarySubjectId     String?  @map("primary_subject_id")
+
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  primarySubject Subject?        @relation("PrimarySubject", fields: [primarySubjectId], references: [id])
+  subjects     TeacherSubject[]
+  tags         TeacherTag[]
+  availability AvailabilitySlot[]
+  reviews      Review[]
+  recommendations VoiceQueryRecommendation[]
+
+  @@index([primarySubjectId])
+}
+
+model TeacherSubject {
+  teacherId String @map("teacher_id")
+  subjectId String @map("subject_id")
+
+  teacher TeacherProfile @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  subject Subject        @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  @@id([teacherId, subjectId])
+}
+
+model TeacherTag {
+  teacherId String @map("teacher_id")
+  tagId     String @map("tag_id")
+
+  teacher TeacherProfile @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  tag     Tag            @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([teacherId, tagId])
+}
+
+model StudentProfile {
+  id         String  @id @default(uuid())
+  userId     String  @unique @map("user_id")
+  gradeLevel String? @map("grade_level")
+  goals      String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AvailabilitySlot {
+  id        String   @id @default(uuid())
+  teacherId String   @map("teacher_id")
+  startAt   DateTime @map("start_at")
+  endAt     DateTime @map("end_at")
+
+  teacher TeacherProfile @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+
+  @@index([teacherId, startAt])
+}
+
+model Review {
+  id         String   @id @default(uuid())
+  studentId  String   @map("student_id")
+  teacherId  String   @map("teacher_id")
+  sessionId  String?  @unique @map("session_id")
+  rating     Int
+  comment    String?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  student User           @relation("ReviewStudent", fields: [studentId], references: [id], onDelete: Cascade)
+  teacher TeacherProfile @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  session LearningSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  @@index([teacherId])
+}
+
+model LearningSession {
+  id          String        @id @default(uuid())
+  teacherId   String        @map("teacher_id")
+  studentId   String        @map("student_id")
+  scheduledAt DateTime      @map("scheduled_at")
+  status      SessionStatus @default(scheduled)
+  notes       String?
+  metadata    Json?
+
+  teacher User @relation("SessionTeacher", fields: [teacherId], references: [id], onDelete: Cascade)
+  student User @relation("SessionStudent", fields: [studentId], references: [id], onDelete: Cascade)
+  review  Review?
+
+  @@index([teacherId, scheduledAt])
+  @@index([studentId, scheduledAt])
+}
+
+model ProgressEntry {
+  id         String   @id @default(uuid())
+  studentId  String   @map("student_id")
+  teacherId  String?  @map("teacher_id")
+  subjectId  String?  @map("subject_id")
+  metricKey  String   @map("metric_key")
+  value      Json
+  recordedAt DateTime @default(now()) @map("recorded_at")
+
+  student User     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  subject Subject? @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+
+  @@index([studentId, recordedAt])
+}
+
+model Document {
+  id          String   @id @default(uuid())
+  ownerUserId String   @map("owner_user_id")
+  title       String
+  storageKey  String   @map("storage_key")
+  mimeType    String   @map("mime_type")
+  sizeBytes   Int      @map("size_bytes")
+  sessionId   String?  @map("session_id")
+  folder      String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  owner User @relation("DocumentOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+
+  @@index([ownerUserId])
+}
+
+model VoiceQuery {
+  id              String           @id @default(uuid())
+  studentId       String           @map("student_id")
+  audioStorageKey String           @map("audio_storage_key")
+  transcript      String?
+  nlpResult       Json?            @map("nlp_result")
+  status          VoiceQueryStatus @default(pending)
+  errorMessage    String?          @map("error_message")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+
+  student         User                         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  recommendations VoiceQueryRecommendation[]
+
+  @@index([studentId])
+}
+
+model VoiceQueryRecommendation {
+  id            String @id @default(uuid())
+  voiceQueryId  String @map("voice_query_id")
+  teacherId     String @map("teacher_id")
+  score         Float
+  rank          Int
+  reason        Json?
+
+  voiceQuery VoiceQuery     @relation(fields: [voiceQueryId], references: [id], onDelete: Cascade)
+  teacher    TeacherProfile @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+
+  @@index([voiceQueryId])
+}
+
+model SavedTeacher {
+  id        String   @id @default(uuid())
+  studentId String   @map("student_id")
+  teacherId String   @map("teacher_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  student User @relation("SavedTeacherStudent", fields: [studentId], references: [id], onDelete: Cascade)
+  teacher User @relation("SavedTeacherTarget", fields: [teacherId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, teacherId])
+  @@index([studentId])
+}
