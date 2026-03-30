@@ -22,10 +22,10 @@ todos:
     status: completed
   - id: frontend-dashboards
     content: "Role-based UI: discovery, dashboards, MediaRecorder voice flow, responsive layout"
-    status: in_progress
+    status: completed
   - id: deploy-ci
     content: Docker images, health checks, GitHub Actions, staging/prod config
-    status: pending
+    status: completed
 isProject: false
 ---
 
