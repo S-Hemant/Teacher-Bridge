@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -32,5 +32,14 @@ export class VoiceController {
   @Get(':id')
   getOne(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.voice.getOne(user.sub, id);
+  }
+
+  @Patch(':id')
+  updateTranscript(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body('transcript') transcript: string,
+  ) {
+    return this.voice.updateTranscript(user.sub, id, transcript);
   }
 }

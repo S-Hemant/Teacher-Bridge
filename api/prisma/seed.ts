@@ -4,115 +4,165 @@ import * as bcrypt from 'bcrypt';
 const prisma = new PrismaClient();
 
 async function main() {
-  const subjects = [
-    { name: 'Mathematics', slug: 'mathematics' },
-    { name: 'Physics', slug: 'physics' },
-    { name: 'English', slug: 'english' },
-    { name: 'Music', slug: 'music' },
-    { name: 'Computer Science', slug: 'computer-science' },
-  ];
+  await prisma.review.deleteMany();
+  await prisma.learningSession.deleteMany();
+  await prisma.savedTeacher.deleteMany();
+  await prisma.voiceQueryRecommendation.deleteMany();
+  await prisma.voiceQuery.deleteMany();
+  await prisma.document.deleteMany();
+  await prisma.progressEntry.deleteMany();
+  await prisma.availabilitySlot.deleteMany();
+  await prisma.teacherTag.deleteMany();
+  await prisma.teacherSubject.deleteMany();
+  await prisma.teacherProfile.deleteMany();
+  await prisma.studentProfile.deleteMany();
+  await prisma.profile.deleteMany();
+  await prisma.refreshToken.deleteMany();
+  await prisma.user.deleteMany();
+  await prisma.tag.deleteMany();
+  await prisma.subject.deleteMany();
 
-  for (const s of subjects) {
-    await prisma.subject.upsert({
-      where: { slug: s.slug },
-      update: {},
-      create: s,
+  const domainMap = {
+    'Engineering': ['Civil', 'Mechanical', 'Software', 'Electrical'],
+    'Business': ['Strategy', 'Finance', 'Operations'],
+    'Marketing': ['SEO', 'Content', 'Social Media'],
+    'Mentoring': ['Career', 'Leadership'],
+    'Medical': ['Anatomy', 'Pharmacology'],
+    'Mathematics': ['Calculus', 'Algebra', 'AP', 'Geometry'],
+    'Physics': ['Mechanics', 'Thermodynamics', 'Quantum'],
+    'English': ['Literature', 'Grammar', 'Conversation'],
+    'Music': ['Piano', 'Vocal', 'Guitar'],
+    'Computer Science': ['Algorithms', 'Web Dev', 'Data Science']
+  };
+
+  const dbSubjects = [];
+  const dbTags = [];
+
+  for (const [subjName, tags] of Object.entries(domainMap)) {
+    const slug = subjName.toLowerCase().replace(/\s+/g, '-');
+    const dbSubj = await prisma.subject.create({
+      data: { name: subjName, slug }
     });
+    dbSubjects.push(dbSubj);
+
+    for (const tagName of tags) {
+      const dbTag = await prisma.tag.create({
+        data: { name: tagName }
+      });
+      dbTags.push({ ...dbTag, subjectId: dbSubj.id });
+    }
   }
 
-  const tags = ['Calculus', 'Algebra', 'AP', 'Beginner', 'Exam Prep', 'Conversation'];
-  for (const name of tags) {
-    await prisma.tag.upsert({
-      where: { name },
-      update: {},
-      create: { name },
-    });
-  }
+  const pass = await bcrypt.hash('Demo123!', 10);
 
-  const math = await prisma.subject.findUniqueOrThrow({ where: { slug: 'mathematics' } });
-  const physics = await prisma.subject.findUniqueOrThrow({ where: { slug: 'physics' } });
+  const teacherProfiles = [];
+  for (let i = 1; i <= 50; i++) {
+    const subj = dbSubjects[i % dbSubjects.length];
+    const subjTags = dbTags.filter(t => t.subjectId === subj.id);
+    const tag1 = subjTags[i % subjTags.length];
+    const tag2 = subjTags[(i + 1) % subjTags.length];
+    
+    // Dedup tags
+    const tagCreates = [];
+    if (tag1) tagCreates.push({ tagId: tag1.id });
+    if (tag2 && tag2.id !== tag1?.id) tagCreates.push({ tagId: tag2.id });
 
-  const pass = await bcrypt.hash('TeacherDemo123!', 10);
-  const teacherUser = await prisma.user.upsert({
-    where: { email: 'teacher@demo.local' },
-    update: {},
-    create: {
-      email: 'teacher@demo.local',
-      passwordHash: pass,
-      role: UserRole.teacher,
-      status: UserStatus.active,
-      profile: {
-        create: {
-          displayName: 'Alex Morgan',
-          bio: 'Experienced math and physics tutor.',
+    const teacherUser = await prisma.user.create({
+      data: {
+        email: `teacher${i}@demo.local`,
+        passwordHash: pass,
+        role: UserRole.teacher,
+        status: UserStatus.active,
+        profile: {
+          create: {
+            displayName: `Teacher ${i} (${subj.name})`,
+            bio: `Experienced professional in ${subj.name} and related domains.`,
+          },
         },
-      },
-      teacherProfile: {
-        create: {
-          headline: 'Math & Physics — 10+ years',
-          yearsExperience: 10,
-          hourlyRateCents: 7500,
-          currency: 'USD',
-          primarySubjectId: math.id,
-          subjects: {
-            create: [{ subjectId: math.id }, { subjectId: physics.id }],
+        teacherProfile: {
+          create: {
+            headline: `Expert in ${subj.name}`,
+            yearsExperience: (i % 15) + 1,
+            hourlyRateCents: 5000 + (i * 100),
+            currency: 'USD',
+            primarySubjectId: subj.id,
+            subjects: {
+              create: [{ subjectId: subj.id }],
+            },
+            tags: {
+              create: tagCreates
+            }
           },
         },
       },
-    },
-    include: { teacherProfile: true },
-  });
+      include: { teacherProfile: true },
+    });
 
-  if (teacherUser.teacherProfile) {
-    const calc = await prisma.tag.findUnique({ where: { name: 'Calculus' } });
-    if (calc) {
-      await prisma.teacherTag.upsert({
-        where: {
-          teacherId_tagId: { teacherId: teacherUser.teacherProfile.id, tagId: calc.id },
-        },
-        update: {},
-        create: { teacherId: teacherUser.teacherProfile.id, tagId: calc.id },
-      });
-    }
+    teacherProfiles.push(teacherUser.teacherProfile);
+
     const nextWeek = new Date();
-    nextWeek.setDate(nextWeek.getDate() + 7);
+    nextWeek.setDate(nextWeek.getDate() + (i % 7));
     const end = new Date(nextWeek);
     end.setHours(end.getHours() + 2);
-    await prisma.availabilitySlot.createMany({
-      data: [
-        {
-          teacherId: teacherUser.teacherProfile.id,
-          startAt: nextWeek,
-          endAt: end,
-        },
-      ],
-      skipDuplicates: true,
+    await prisma.availabilitySlot.create({
+      data: {
+        teacherId: teacherUser.teacherProfile!.id,
+        startAt: nextWeek,
+        endAt: end,
+      }
     });
   }
 
-  const spass = await bcrypt.hash('StudentDemo123!', 10);
-  await prisma.user.upsert({
-    where: { email: 'student@demo.local' },
-    update: {},
-    create: {
-      email: 'student@demo.local',
-      passwordHash: spass,
-      role: UserRole.student,
-      status: UserStatus.active,
-      profile: {
-        create: {
-          displayName: 'Jamie Lee',
+  const studentUsers = [];
+  for (let i = 1; i <= 10; i++) {
+    const studentUser = await prisma.user.create({
+      data: {
+        email: `student${i}@demo.local`,
+        passwordHash: pass,
+        role: UserRole.student,
+        status: UserStatus.active,
+        profile: {
+          create: {
+            displayName: `Student ${i}`,
+          },
+        },
+        studentProfile: {
+          create: {
+            goals: `Learn more about various subjects`,
+          },
         },
       },
-      studentProfile: {
-        create: {
-          goals: 'Improve calculus grades',
-        },
-      },
-    },
-  });
+    });
+    studentUsers.push(studentUser);
+  }
 
-  console.log('Seed completed: demo teacher/student, subjects, tags.');
+  for (let i = 0; i < 50; i++) {
+    const teacherProf = teacherProfiles[i]!;
+    const numReviews = (i % 3) + 2; 
+    for (let j = 0; j < numReviews; j++) {
+      const student = studentUsers[(i + j) % studentUsers.length];
+      const sess = await prisma.learningSession.create({
+        data: {
+          teacherId: teacherProf.userId,
+          studentId: student.id,
+          scheduledAt: new Date(Date.now() - (j * 86400000)),
+          status: 'completed',
+        }
+      });
+
+      await prisma.review.create({
+        data: {
+          studentId: student.id,
+          teacherId: teacherProf.id,
+          sessionId: sess.id,
+          rating: 3 + (j % 3), // 3, 4, 5
+          comment: `Great session ${j + 1}! Highly recommend.`
+        }
+      });
+    }
+  }
+
+  console.log('Seed completed: 50 diverse professional teachers, 10 students, and mock reviews generated.');
 }
 
 main()

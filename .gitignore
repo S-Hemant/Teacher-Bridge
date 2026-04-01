@@ -27,3 +27,4 @@ Thumbs.db
 !.vscode/extensions.json
 
 # Prisma (keep migrations; ignore local DB URL leaks via .env only)
+Docker.dmg
